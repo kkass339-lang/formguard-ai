@@ -57,25 +57,12 @@ def ensure_positive(x):
             print("Counterexample Input Vectors:")
             print(json.dumps(result["counterexample"], indent=2))
         sys.exit(1)
-    else:
-        print("\n✅ Verification Successful: Logic holds strictly across all state spaces.")
+    elif status == "UNSAT":
+        print("\n✅ Verification Successful: Logic holds strictly across all state spaces (UNSAT - no counterexample exists).")
         sys.exit(0)
-
-if __name__ == "__main__":
-    run_cli()
-
-    print(f"\nVerification Status: {status}")
-    print(f"Message: {message}")
-
-    if status in ["FAILED", "ERROR", "SAT"] or result.get("counterexample"):
-        print("\n❌ CRITICAL LOGIC FLAW OR INVARIANT VIOLATION DETECTED!")
-        if result.get("counterexample"):
-            print("Counterexample Input Vectors:")
-            print(json.dumps(result["counterexample"], indent=2))
+    else:
+        print(f"\n⚠️ Verification result inconclusive ({status}).")
         sys.exit(1)
-    else:
-        print("\n✅ Verification Successful: Logic holds strictly across all state spaces.")
-        sys.exit(0)
 
 if __name__ == "__main__":
     run_cli()

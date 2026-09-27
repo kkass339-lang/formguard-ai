@@ -7,14 +7,11 @@ class FormGuardVerifier:
     def verify_dynamic_code(self, var_name, code_str, rule_str):
         """
         Interpretiert dynamischen Python-Code und Sicherheitsregeln
-        und prüft diese mittels Z3.
+        und prüft diese mittels Z3 SMT-Solver.
         """
         solver = Solver()
-        
-        # Z3 Variable dynamisch erstellen
         x = Real(var_name)
         
-        # Sicherer Ausführungs-Kontext für eval()
         eval_globals = {
             "x": x,
             "Real": Real,
@@ -25,42 +22,38 @@ class FormGuardVerifier:
         }
         
         try:
-            # Code-Ausdruck & Regel-Ausdruck sicher auswerten
-            y = eval(code_str, eval_globals)
-            rule = eval(rule_str, {"x": x, "y": y, "And": And, "Or": Or, "Not": Not})
+            expr = eval(code_str, eval_globals)
+            rule = eval(rule_str, eval_globals)
             
-            # Fehlerbedingung dem Solver hinzufügen
-            solver.add(rule)
+            # Wir ersetzen 'x' in der Regel durch das Ergebnis von 'expr'
+            # und suchen nach einem Gegenbeispiel (Not(rule)):
+            rule_substituted = substitute(rule, (x, expr))
+            solver.add(Not(rule_substituted))
             
-            # Prüfen
-            if solver.check() == sat:
-                model = solver.model()
-                
-                # Werte aus Z3 Modell auslesen
-                input_val = model[x]
-                
-                # Falls Ausgabe ein Z3-Wert ist, berechnen
-                if hasattr(y, 'simplify'):
-                    output_val = model.eval(y)
-                else:
-                    output_val = y
-                    
+            check_result = solver.check()
+            
+            if check_result == unsat:
+                return {
+                    "status": "UNSAT",
+                    "message": "Verification Successful: Invariant holds strictly across all inputs."
+                }
+            elif check_result == sat:
+                m = solver.model()
                 return {
                     "status": "SAT",
                     "message": "CRITICAL VULNERABILITY DETECTED",
                     "counterexample": {
-                        "input": str(input_val),
-                        "output": str(output_val)
+                        "input": str(m[x]),
+                        "output": str(expr)
                     }
                 }
             else:
                 return {
-                    "status": "UNSAT",
-                    "message": "CODE MATHEMATICALLY VERIFIED SAFE"
+                    "status": "UNKNOWN",
+                    "message": "Solver could not determine satisfiability."
                 }
-                
         except Exception as e:
             return {
                 "status": "ERROR",
-                "message": f"Syntax- oder Parsing-Fehler: {str(e)}"
+                "message": f"Syntax or Parsing Error: {str(e)}"
             }
