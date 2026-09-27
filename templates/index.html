@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FormGuard AI - Dynamic Verification Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 750px;
+            width: 100%;
+            background: #1e293b;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border: 1px solid #334155;
+        }
+        h1 { margin-top: 0; font-size: 1.8rem; color: #38bdf8; }
+        p { color: #94a3b8; line-height: 1.5; }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #cbd5e1;
+            font-size: 0.95rem;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            background-color: #020617;
+            color: #f8fafc;
+            font-family: monospace;
+            font-size: 0.95rem;
+            box-sizing: border-box;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #38bdf8;
+        }
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .btn-preset {
+            background-color: #334155;
+            color: #f8fafc;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .btn-preset:hover {
+            background-color: #475569;
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background-color: #38bdf8;
+            color: #0f172a;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-submit:hover {
+            background-color: #0284c7;
+            color: white;
+        }
+        .results-card {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 8px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            display: none;
+        }
+        .status-sat { border-left: 5px solid #ef4444; color: #fca5a5; }
+        .status-unsat { border-left: 5px solid #10b981; color: #6ee7b7; }
+        .status-error { border-left: 5px solid #f59e0b; color: #fcd34d; }
+        pre { background: #020617; padding: 12px; border-radius: 6px; color: #e2e8f0; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ FormGuard AI</h1>
+        <p>Symbolische Formalverifikation von Python-Code mittels Z3 SMT-Solver.</p>
+        
+        <div class="preset-buttons">
+            <button class="btn-preset" onclick="loadPreset('unsafe')">Beispiel 1: Unsicherer Code</button>
+            <button class="btn-preset" onclick="loadPreset('safe')">Beispiel 2: Gesicherter Code</button>
+        </div>
+
+        <div class="form-group">
+            <label for="var_name">Variablenname (Eingabe):</label>
+            <input type="text" id="var_name" value="x">
+        </div>
+
+        <div class="form-group">
+            <label for="code_str">Code-Logik (Ergebnis y):</label>
+            <input type="text" id="code_str" value="x * 2 - 10">
+        </div>
+
+        <div class="form-group">
+            <label for="rule_str">Sicherheitsbedingung (Soll NIEMALS eintreten):</label>
+            <input type="text" id="rule_str" value="And(x > 0, y < 0)">
+        </div>
+
+        <button class="btn-submit" onclick="runVerification()">Code symbolisch verifizieren</button>
+
+        <div id="results" class="results-card">
+            <h3 id="res-title">Ergebnis</h3>
+            <p id="res-message"></p>
+            <div id="counterexample-box" style="display: none;">
+                <strong>Gefundenes Gegenbeispiel:</strong>
+                <pre id="res-details"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function loadPreset(type) {
+            if (type === 'unsafe') {
+                document.getElementById('code_str').value = 'x * 2 - 10';
+                document.getElementById('rule_str').value = 'And(x > 0, y < 0)';
+            } else if (type === 'safe') {
+                document.getElementById('code_str').value = 'If(x * 2 - 10 < 0, 0, x * 2 - 10)';
+                document.getElementById('rule_str').value = 'And(x > 0, y < 0)';
+            }
+        }
+
+        async function runVerification() {
+            const resultsDiv = document.getElementById('results');
+            const resTitle = document.getElementById('res-title');
+            const resMessage = document.getElementById('res-message');
+            const counterBox = document.getElementById('counterexample-box');
+            const resDetails = document.getElementById('res-details');
+
+            const varName = document.getElementById('var_name').value;
+            const codeStr = document.getElementById('code_str').value;
+            const ruleStr = document.getElementById('rule_str').value;
+
+            resultsDiv.style.display = 'block';
+            resTitle.textContent = 'Berechne Z3-Beweis...';
+            resMessage.textContent = 'Bitte warten, symbolische Analyse läuft...';
+            counterBox.style.display = 'none';
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        var_name: varName,
+                        code_str: codeStr,
+                        rule_str: ruleStr
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'SAT') {
+                    resultsDiv.className = 'results-card status-sat';
+                    resTitle.textContent = '⚠️ Kritische Schwachstelle entdeckt (SAT)';
+                    resMessage.textContent = data.message;
+                    counterBox.style.display = 'block';
+                    resDetails.textContent = `Eingabe (${varName}): ${data.counterexample.input}\nAusgabe (y): ${data.counterexample.output}`;
+                } else if (data.status === 'UNSAT') {
+                    resultsDiv.className = 'results-card status-unsat';
+                    resTitle.textContent = '✅ Mathematisch verifiziert (UNSAT)';
+                    resMessage.textContent = data.message;
+                } else {
+                    resultsDiv.className = 'results-card status-error';
+                    resTitle.textContent = '⚠️ Syntax- oder Formelfehler';
+                    resMessage.textContent = data.message;
+                }
+            } catch (err) {
+                resultsDiv.className = 'results-card status-sat';
+                resTitle.textContent = '❌ Verbindung zum Server fehlgeschlagen';
+                resMessage.textContent = 'Läuft dein Python-Server (`py server.py`) im Hintergrund?';
+            }
+        }
+    </script>
+</body>
+</html>
