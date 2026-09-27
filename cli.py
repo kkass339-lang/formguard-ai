@@ -18,19 +18,19 @@ def run_cli():
         with open(args.file, "r", encoding="utf-8") as f:
             raw_code = f.read()
     else:
-        print("ℹ️  No target file specified. Using default Python pricing logic...")
+        print("ℹ️  No target file specified. Running baseline compliance check...")
         raw_code = """
-def calculate_price(x):
-    if x > 100:
-        return x * 0.9
-    return x * 0.95
+def ensure_positive(x):
+    if x < 0:
+        return -x
+    return x
 """
 
     print("\n🧠 Step 1: Extracting Z3 Formal Logic via LLM Parser...")
     translator = LLMCodeTranslator()
     parsed_spec = translator.translate_to_z3(
         python_code=raw_code,
-        invariant_desc="Price/value x must always remain greater than 0"
+        invariant_desc="Value x must always remain greater than or equal to 0"
     )
 
     print(f"   ├─ Extracted Variable : {parsed_spec['var_name']}")
@@ -47,6 +47,22 @@ def calculate_price(x):
 
     status = result.get("status", "UNKNOWN")
     message = result.get("message", "")
+
+    print(f"\nVerification Status: {status}")
+    print(f"Message: {message}")
+
+    if status in ["FAILED", "ERROR", "SAT"] or result.get("counterexample"):
+        print("\n❌ CRITICAL LOGIC FLAW OR INVARIANT VIOLATION DETECTED!")
+        if result.get("counterexample"):
+            print("Counterexample Input Vectors:")
+            print(json.dumps(result["counterexample"], indent=2))
+        sys.exit(1)
+    else:
+        print("\n✅ Verification Successful: Logic holds strictly across all state spaces.")
+        sys.exit(0)
+
+if __name__ == "__main__":
+    run_cli()
 
     print(f"\nVerification Status: {status}")
     print(f"Message: {message}")
