@@ -1,68 +1,76 @@
-import sys
-import os
-import json
 import argparse
-from core.formguard_core import FormGuardVerifier
-from core.llm_parser import LLMCodeTranslator
+import sys
+from formguard_core import MultiVariableFormGuard
+from llm_parser import FunctionParser
 
-def run_cli():
-    parser = argparse.ArgumentParser(description="FormGuard AI - Automated Logic Verification CLI")
-    parser.add_argument("file", nargs="?", default=None, help="Path to Python source file")
+def main():
+    parser = argparse.ArgumentParser(
+        description="FormGuard AI - Neuro-Symbolic Verification Engine"
+    )
+    
+    parser.add_argument(
+        "--file", "-f", type=str, help="Pfad zur Python-Datei, die gescannt werden soll."
+    )
+    parser.add_argument(
+        "--code", "-c", type=str, help="Python-Funktion direkt als String übergeben."
+    )
+    parser.add_argument(
+        "--invariant", "-i", type=str, required=True, 
+        help="Sicherheitsinvariante, z. B. 'final_price >= 0'"
+    )
+
     args = parser.parse_args()
 
-    print("🛡️  FormGuard AI Automated Logic Verification Engine")
+    code_to_verify = ""
+    if args.file:
+        try:
+            with open(args.file, "r", encoding="utf-8") as f:
+                code_to_verify = f.read()
+        except Exception as e:
+            print(f"❌ Fehler beim Lesen der Datei: {e}")
+            sys.exit(1)
+    elif args.code:
+        code_to_verify = args.code
+    else:
+        print("❌ Bitte gib eine Datei mit --file oder Code mit --code an.")
+        sys.exit(1)
+
+    # 1. AST Parsing
+    print("\n🔍 Analysiere Funktion...")
+    parsed_info = FunctionParser.parse_function_str(code_to_verify)
+    
+    if "error" in parsed_info:
+        print(f"❌ {parsed_info['error']}")
+        sys.exit(1)
+
+    print(f"📌 Funktion: {parsed_info['func_name']}({', '.join(parsed_info['args'])})")
+    print(f"📌 Return-Formel: {parsed_info['return_expr']}")
+    print(f"🛡️ Prüfe Invariante: '{args.invariant}'")
     print("--------------------------------------------------")
 
-    if args.file and os.path.exists(args.file):
-        print(f"📄 Target Source File: {args.file}")
-        with open(args.file, "r", encoding="utf-8") as f:
-            raw_code = f.read()
-    else:
-        print("ℹ️  No target file specified. Running baseline compliance check...")
-        raw_code = """
-def ensure_positive(x):
-    if x < 0:
-        return -x
-    return x
-"""
-
-    print("\n🧠 Step 1: Extracting Z3 Formal Logic via LLM Parser...")
-    translator = LLMCodeTranslator()
-    parsed_spec = translator.translate_to_z3(
-        python_code=raw_code,
-        invariant_desc="Value x must always remain greater than or equal to 0"
+    # 2. Z3 Verification
+    guard = MultiVariableFormGuard()
+    res = guard.verify_invariant(
+        code_expr_str=parsed_info["return_expr"],
+        invariant_str=args.invariant,
+        var_names=parsed_info["args"]
     )
 
-    print(f"   ├─ Extracted Variable : {parsed_spec['var_name']}")
-    print(f"   ├─ Generated Z3 Expr  : {parsed_spec['z3_expr']}")
-    print(f"   └─ Invariant Rule     : {parsed_spec['rule_expr']}")
-
-    print("\n🔬 Step 2: Executing Z3 Formal Mathematical Verification...")
-    engine = FormGuardVerifier()
-    result = engine.verify_dynamic_code(
-        var_name=parsed_spec["var_name"],
-        code_str=parsed_spec["z3_expr"],
-        rule_str=parsed_spec["rule_expr"]
-    )
-
-    status = result.get("status", "UNKNOWN")
-    message = result.get("message", "")
-
-    print(f"\nVerification Status: {status}")
-    print(f"Message: {message}")
-
-    if status in ["FAILED", "ERROR", "SAT"] or result.get("counterexample"):
-        print("\n❌ CRITICAL LOGIC FLAW OR INVARIANT VIOLATION DETECTED!")
-        if result.get("counterexample"):
-            print("Counterexample Input Vectors:")
-            print(json.dumps(result["counterexample"], indent=2))
+    # 3. Output
+    if res["status"] == "SAT":
+        print("❌ VERIFICATION FAILED!")
+        print(f"Message: {res['message']}")
+        print("🚨 Gegenbeispiel gefunden:")
+        for var_name, val in res["counterexample"].items():
+            print(f"   • {var_name} = {val}")
         sys.exit(1)
-    elif status == "UNSAT":
-        print("\n✅ Verification Successful: Logic holds strictly across all state spaces (UNSAT - no counterexample exists).")
+    elif res["status"] == "UNSAT":
+        print("✅ VERIFICATION SUCCESSFUL!")
+        print(f"Message: {res['message']}")
         sys.exit(0)
     else:
-        print(f"\n⚠️ Verification result inconclusive ({status}).")
+        print(f"⚠️ UNKNOWN STATUS: {res['message']}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    run_cli()
+    main()
